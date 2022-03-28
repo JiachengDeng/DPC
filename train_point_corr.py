@@ -51,7 +51,7 @@ def main_train(model_class_pointer, hparams,parser):
 
     if(hparams.resume_from_checkpoint is not None):
         hparams = load_params_from_checkpoint(hparams, parser)
-
+        hparams.default_root_dir = '/data/djc/PointCorrespondence/DPC/output/shape_corr' ##Avoid changing the root directory
     model = model_class_pointer(hparams)
     model.hparams.display_id = display_id
 
@@ -85,20 +85,21 @@ def main_train(model_class_pointer, hparams,parser):
         gradient_clip_val=hparams.gradient_clip_val,
         benchmark=True,  
         gpus=str(hparams.gpus) if str(hparams.gpus)!="-1" else None,  # if not hparams.DEBUG_MODE else 1,
-        distributed_backend="dp" if hparams.gpus!="-1" else None,  # if not hparams.DEBUG_MODE else 'sp',
+        strategy="dp" if hparams.gpus!="-1" else None,  # if not hparams.DEBUG_MODE else 'sp',
         num_sanity_val_steps=hparams.num_sanity_val_steps,
         val_check_interval=hparams.val_check_interval,  # how many times(0.25=4) to run validation each training loop
         limit_train_batches=hparams.limit_train_batches,  # how much of the training data to train on
         limit_val_batches=hparams.limit_val_batches,  # how much of the validation data to train on
         limit_test_batches=hparams.limit_test_batches,  # how much of the validation data to train on
-        terminate_on_nan=True,
+        # terminate_on_nan=True,
+        detect_anomaly=True,
         check_val_every_n_epoch=hparams.check_val_every_n_epoch,
 
         # load
         resume_from_checkpoint=hparams.resume_from_checkpoint,
         replace_sampler_ddp=False,
         accumulate_grad_batches=hparams.accumulate_grad_batches,
-        flush_logs_every_n_steps=hparams.flush_logs_every_n_steps,
+        flush_logs_every_n_steps=hparams.flush_logs_every_n_steps, #Unlike the log_every_n_steps, this argument does not apply to all loggers.
         log_every_n_steps=hparams.log_every_n_steps,
         
         reload_dataloaders_every_epoch=False,

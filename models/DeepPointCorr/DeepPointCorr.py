@@ -280,12 +280,12 @@ class DeepPointCorr(ShapeCorrTemplate):
             optimizer="adam",
             lr=0.0003,
             weight_decay=5e-4,
-            max_epochs=300,
+            max_epochs=300, #max_epochs=300,
             accumulate_grad_batches=2,
             latent_dim=768,
             DGCNN_latent_dim=512,
             bb_size=24,
-            num_neighs=27,
+            num_neighs=36, #num_neighs=27
 
             val_vis_interval=20,
             test_vis_interval=20,

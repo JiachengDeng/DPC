@@ -36,8 +36,12 @@ def prepare_smal_original_data(split,hparams):
         for file in tqdm(list(Path(smal_original_data_path).rglob(f"*{split}*"))):
             shape = MeshContainer().load_from_file(str(file))
             verts.append(shape.vert)
-        face = shape.face
-        torch.save((verts,face),data_path,pickle_protocol=4)
+        try:
+            face = shape.face
+            torch.save((verts,face),data_path,pickle_protocol=4)
+        except NameError:
+            print("There is no validation set.")
+
     return data_path
 
 
@@ -62,7 +66,10 @@ class SMAL(PointCloudDataset):
                 num_shapes = int(math.sqrt(gt_map.shape[0]))
                 all_pairs = list(itertools.product(list(range(num_shapes)), list(range(num_shapes))))
                 all_pairs = np.array(list(filter(lambda pair: pair[0] != pair[1],all_pairs)))
-                indices = np.random.choice(len(all_pairs), self.hparams.limit_test_batches, replace=False).tolist()
+                ###modified by Jiacheng Deng
+                test_size = int(len(all_pairs)*self.hparams.limit_test_batches)
+                ###
+                indices = np.random.choice(len(all_pairs), test_size, replace=False).tolist()
                 all_pairs = all_pairs[indices]
                 torch.save(all_pairs,gt_pairs_path)
             all_pairs = torch.load(gt_pairs_path)
