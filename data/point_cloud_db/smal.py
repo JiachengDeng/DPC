@@ -62,7 +62,10 @@ class SMAL(PointCloudDataset):
                 num_shapes = int(math.sqrt(gt_map.shape[0]))
                 all_pairs = list(itertools.product(list(range(num_shapes)), list(range(num_shapes))))
                 all_pairs = np.array(list(filter(lambda pair: pair[0] != pair[1],all_pairs)))
-                indices = np.random.choice(len(all_pairs), self.hparams.limit_test_batches, replace=False).tolist()
+                ###Modified by Jiacheng Deng
+                test_size = int(len(all_pairs)*self.hparams.limit_test_batches)
+                ###
+                indices = np.random.choice(len(all_pairs), test_size, replace=False).tolist()
                 all_pairs = all_pairs[indices]
                 torch.save(all_pairs,gt_pairs_path)
             all_pairs = torch.load(gt_pairs_path)

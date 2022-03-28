@@ -65,10 +65,11 @@ def load_dataset(params):
         dataset = SMAL(params,"train")
         train_size = int(len(dataset) * params.train_val_split)
         train_dataset,val_dataset = random_split(dataset, [train_size, len(dataset) - train_size])
-        test_dataset = SMAL(params,"test")
-
+        ###Modified by djc
         if(params.test_on_tosca):
             test_dataset = TOSCA(params,"test")
+        else:
+            test_dataset = SMAL(params,"test")
 
         return train_dataset,val_dataset,test_dataset
 
