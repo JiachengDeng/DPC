@@ -25,6 +25,9 @@ def model_class_pointer(task_name, model_name):
         if model_name == 'DeepPointCorr':
             from models.DeepPointCorr.DeepPointCorr import DeepPointCorr
             return DeepPointCorr
+        elif model_name == 'CrossPointCorr':
+            from models.DeepPointCorr.CrossPointCorr import CrossPointCorr
+            return CrossPointCorr
 
     raise Exception("Unkown arch")
 
@@ -65,7 +68,7 @@ def load_dataset(params):
         dataset = SMAL(params,"train")
         train_size = int(len(dataset) * params.train_val_split)
         train_dataset,val_dataset = random_split(dataset, [train_size, len(dataset) - train_size])
-        ###Modified by Jiacheng Deng
+        ###Modified by djc
         if(params.test_on_tosca):
             test_dataset = TOSCA(params,"test")
         else:

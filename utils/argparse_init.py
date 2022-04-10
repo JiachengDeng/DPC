@@ -192,6 +192,7 @@ def init_parse_argparse_default_params(parser, dataset_name=None, arch=None):
         help="The the output feature dimention",
     )
     parser.add_argument("--in_features_dim", default=3, help="feature length of input samples")
+    parser.add_argument("--ckpt_period", type=int, default=25, help="the monitors are checked every ``period`` epochs")
 
     ### Auxiliary parameters
     parser.add_argument(

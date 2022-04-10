@@ -99,6 +99,12 @@ We provide a trained checkpoint repreducing the results provided in the paper, t
 ``` 
 python train_point_corr.py --show_vis --do_train false --resume_from_checkpoint data/ckpts/surreal_ckpt.ckpt
 ```
+# Common BUGs
+```
+TypeError: on_train_epoch_end() missing 1 required positional argument: 'outputs'
+```
+Reference: [PyTorch-Lightning](https://github.com/williamFalcon/pytorch-lightning-vae/issues/7)
+Solve: ![debug](./data/images/debug.png)
 
 
 ![Results](./data/images/dpc_result.png)
