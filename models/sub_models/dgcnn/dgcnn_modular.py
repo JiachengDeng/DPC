@@ -18,13 +18,14 @@ import torch.nn.functional as F
 
 
 class DGCNN_MODULAR(nn.Module):
-    def __init__(self, hparams, output_dim=None,use_inv_features=False,latent_dim=None,use_only_classification_head=False,): # bb - Building block
+    def __init__(self, hparams, output_dim=None,use_inv_features=False,latent_dim=None,use_only_classification_head=False,return_inter=False): # bb - Building block
         super(DGCNN_MODULAR, self).__init__()
         self.hparams = hparams
         self.num_neighs = hparams.num_neighs
         self.latent_dim = latent_dim if latent_dim is not None else hparams.DGCNN_latent_dim
         self.input_features = self.hparams.in_features_dim * 2
         self.use_inv_features = use_inv_features
+        self.return_inter = return_inter
         if(self.use_inv_features):
             self.input_features = 4
 
@@ -84,6 +85,13 @@ class DGCNN_MODULAR(nn.Module):
 
         x = torch.cat(outs[1:], dim=1)
         features = self.convs[-1](x)
+        
+        #For Shape Selective Wightening Loss
+        if self.return_inter:
+            inter_fea = []
+            for i in range(1,self.depth + 1):
+                inter_fea.append(outs[i].transpose(1,2))
+            return features.transpose(1,2), inter_fea
         return features.transpose(1,2)
         # It is advised
     

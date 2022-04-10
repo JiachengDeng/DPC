@@ -10,6 +10,8 @@ from models.sub_models.cross_attention.position_embedding import PositionEmbeddi
     PositionEmbeddingLearned
 from models.sub_models.cross_attention.warmup import WarmUpScheduler
 
+from models.sub_models.ssw_loss.ssw_loss import StereoWhiteningLoss
+
 import numpy as np
 
 from torch.optim.lr_scheduler import MultiStepLR, StepLR
@@ -55,7 +57,7 @@ class CrossPointCorr(ShapeCorrTemplate):
     def __init__(self, hparams, **kwargs):
         """Stub."""
         super(CrossPointCorr, self).__init__(hparams, **kwargs)
-        self.encoder_DGCNN = DGCNN_MODULAR(self.hparams, use_inv_features=self.hparams.use_inv_features)
+        self.encoder_DGCNN = DGCNN_MODULAR(self.hparams, use_inv_features=self.hparams.use_inv_features,return_inter="compute_ssw_loss" in self.hparams and self.hparams.compute_ssw_loss)
         
         ###transformer
         self.encoder_CROSS_layer = TransformerCrossEncoderLayer(
@@ -70,6 +72,10 @@ class CrossPointCorr(ShapeCorrTemplate):
         self.encoder_CROSS = TransformerCrossEncoder(
             self.encoder_CROSS_layer, self.hparams.num_encoder_layers, self.encoder_norm)
         self.pos_embed = PositionEmbeddingCoordsSine(3, self.hparams.d_embed, scale= 1.0)
+        ###
+        
+        ###Shape Selective whitening
+        self.loss_stereo_ssw = StereoWhiteningLoss()
         ###
 
         self.chamfer_dist_3d = dist_chamfer_3D.chamfer_3DDist()
@@ -98,15 +104,19 @@ class CrossPointCorr(ShapeCorrTemplate):
         elif self.hparams.steplr:
             self.optimizer = torch.optim.AdamW(self.parameters(), lr=0.0001, weight_decay=0.0001)
             self.scheduler = StepLR(optimizer=self.optimizer, step_size=200, gamma=0.5)
+        elif self.hparams.multistep:
+            self.optimizer = torch.optim.AdamW(self.parameters(), lr=0.0001, weight_decay=0.0001)
+            self.scheduler = MultiStepLR(self.optimizer, milestones=[200, 260, 280], gamma=0.5)
         else:
             self.optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
             self.scheduler = MultiStepLR(self.optimizer, milestones=[6, 9], gamma=0.1)
         return [self.optimizer], [self.scheduler]
 
     def compute_deep_features(self, shape):
-        shape["dense_output_features"] = self.encoder_DGCNN.forward_per_point(
-            shape["pos"], start_neighs=shape["neigh_idxs"]
-        )
+        if self.hparams.compute_ssw_loss:
+            shape["dense_output_features"], shape["intermediate_features"] = self.encoder_DGCNN.forward_per_point(shape["pos"], start_neighs=shape["neigh_idxs"])
+        else:
+            shape["dense_output_features"] = self.encoder_DGCNN.forward_per_point(shape["pos"], start_neighs=shape["neigh_idxs"])
         return shape
     
     def compute_cross_features(self, source, target): 
@@ -266,6 +276,13 @@ class CrossPointCorr(ShapeCorrTemplate):
             self.losses[f"neigh_loss_fwd"] = self.hparams.neigh_loss_lambda * data[f"neigh_loss_fwd_unscaled"]
             self.losses[f"neigh_loss_bac"] = self.hparams.neigh_loss_lambda * data[f"neigh_loss_bac_unscaled"]
 
+        #TODO: change current epoch
+        if self.hparams.compute_ssw_loss and self.hparams.ssw_loss_lambda > 0.0 and self.current_epoch > self.hparams.max_epochs-50:
+            cov_list=self.loss_stereo_ssw.cal_cov([data["source"]["intermediate_features"],data["target"]["intermediate_features"]])
+            data[f"ssw_loss"] = self.loss_stereo_ssw(data["source"]["intermediate_features"], cov_list=cov_list, weight=10.0)
+            
+            self.losses[f"source_ssw_loss"] = self.hparams.ssw_loss_lambda * data[f"ssw_loss"]
+
         self.track_metrics(data)
 
         return data
@@ -282,7 +299,10 @@ class CrossPointCorr(ShapeCorrTemplate):
         batch = {"source": source, "target": target}
         batch = self(batch)
         p = batch["P_normalized"].clone()
-
+        if self.hparams.use_dualsoftmax_loss:
+            temp = 1
+            p = p * F.softmax(p/temp, dim=0)*len(p) #With an appropriate temperature parameter, the model achieves higher performance
+            p = F.log_softmax(p, dim=-1)
 
 
         _ = self.compute_acc(label, ratio_list, soft_labels, p,input2,track_dict=self.tracks,hparams=self.hparams)
@@ -338,6 +358,18 @@ class CrossPointCorr(ShapeCorrTemplate):
         parser.add_argument("--transformer_encoder_has_pos_emb", nargs="?", default=True, type=str2bool, const=False, help="whether to use position embedding in transformer encoder")
         parser.add_argument("--warmup", nargs="?", default=False, type=str2bool, const=True, help="whether to use warmup")
         parser.add_argument("--steplr", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR")
+        parser.add_argument("--multistep", nargs="?", default=False, type=str2bool, const=True, help="whether to use MultiStepLR")
+        
+        '''
+        Shape Selective Whitening Loss-related args
+        '''
+        parser.add_argument("--compute_ssw_loss", nargs="?", default=False, type=str2bool, const=True, help="whether to compute shape selective whitening loss")
+        parser.add_argument("--ssw_loss_lambda", type=float, default=10.0, help="weight for SSW loss")
+        
+        '''
+        Dual Softmax Loss-related args
+        '''
+        parser.add_argument("--use_dualsoftmax_loss", nargs="?", default=False, type=str2bool, const=True, help="whether to use dual softmax loss")
 
         parser.set_defaults(
             optimizer="adam",

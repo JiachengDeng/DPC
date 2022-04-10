@@ -70,7 +70,8 @@ def main_train(model_class_pointer, hparams,parser):
         dirpath=model.hparams.log_to_dir,
         filename="{epoch:02d}",
         verbose=True,
-        save_top_k=-1  # saves all checkpoints
+        save_top_k=-1,  # saves all checkpoints
+        period=model.hparams.ckpt_period
     )
 
 
