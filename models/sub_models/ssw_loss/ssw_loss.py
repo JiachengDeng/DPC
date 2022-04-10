@@ -28,9 +28,9 @@ class StereoWhiteningLoss(object):
             cov_matrix = cov_list[idx]
 
             var_flatten = cov_matrix.flatten()
-            clusters, centroids = kmeans1d.cluster(var_flatten, self.clusters)
-            num_sensitive = clusters.count(self.clusters-1)
-            values, indices = torch.topk(var_flatten, k=int(num_sensitive))
+            # clusters, centroids = kmeans1d.cluster(var_flatten, self.clusters)
+            # num_sensitive = clusters.count(self.clusters-1)
+            values, indices = torch.topk(var_flatten, k=200)
 
             mask_matrix = torch.zeros(B, dim, dim).cuda()
             mask_matrix = mask_matrix.view(B, -1).contiguous()
