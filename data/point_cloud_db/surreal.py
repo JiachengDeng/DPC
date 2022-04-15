@@ -38,7 +38,8 @@ class Fake_pair_indices:
     def __init__(self, len):
         self.length = len
     def __getitem__(self, key):
-        source_idx = torch.div(key, (self.length - 1),rounding_mode='trunc')
+        # source_idx = int(torch.div(key, (self.length - 1),rounding_mode='trunc'))
+        source_idx = key // (self.length - 1)
         target_idx = key % source_idx if source_idx > 0  else key
         target_idx = target_idx if target_idx < source_idx else target_idx + 1
         return source_idx,target_idx

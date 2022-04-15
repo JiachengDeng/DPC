@@ -51,7 +51,7 @@ def main_train(model_class_pointer, hparams,parser):
 
     if(hparams.resume_from_checkpoint is not None):
         hparams = load_params_from_checkpoint(hparams, parser)
-        hparams.default_root_dir = '/data/djc/PointCorrespondence/DPC/output/shape_corr' ##Avoid changing the root directory
+        hparams.default_root_dir = '/data/xgx/mycode/DPC/output/shape_corr' ##Avoid changing the root directory
     model = model_class_pointer(hparams)
     model.hparams.display_id = display_id
 

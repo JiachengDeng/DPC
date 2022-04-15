@@ -104,6 +104,9 @@ class CrossPointCorr(ShapeCorrTemplate):
         elif self.hparams.steplr:
             self.optimizer = torch.optim.AdamW(self.parameters(), lr=0.0001, weight_decay=0.0001)
             self.scheduler = StepLR(optimizer=self.optimizer, step_size=200, gamma=0.5)
+        elif self.hparams.steplr2:
+            self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.slr, weight_decay=self.hparams.swd)
+            self.scheduler = StepLR(optimizer=self.optimizer, step_size=80, gamma=0.1)
         else:
             self.optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
             self.scheduler = MultiStepLR(self.optimizer, milestones=[6, 9], gamma=0.1)
@@ -297,7 +300,7 @@ class CrossPointCorr(ShapeCorrTemplate):
         batch = self(batch)
         p = batch["P_normalized"].clone()
         if self.hparams.use_dualsoftmax_loss:
-            temp = 1
+            temp = 0.0002
             p = p * F.softmax(p/temp, dim=0)*len(p) #With an appropriate temperature parameter, the model achieves higher performance
             p = F.log_softmax(p, dim=-1)
 
@@ -355,6 +358,9 @@ class CrossPointCorr(ShapeCorrTemplate):
         parser.add_argument("--transformer_encoder_has_pos_emb", nargs="?", default=True, type=str2bool, const=False, help="whether to use position embedding in transformer encoder")
         parser.add_argument("--warmup", nargs="?", default=False, type=str2bool, const=True, help="whether to use warmup")
         parser.add_argument("--steplr", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR")
+        parser.add_argument("--steplr2", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR2")
+        parser.add_argument("--slr", type=float, default= 5e-4, help="steplr learning rate")
+        parser.add_argument("--swd", default=5e-4, type=float, help="steplr2 weight decay")
         
         '''
         Shape Selective Whitening Loss-related args
