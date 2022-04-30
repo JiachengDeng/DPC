@@ -41,25 +41,36 @@ class DGCNN_MODULAR(nn.Module):
             for i in range(self.depth):
                 in_features = self.input_features if i == 0 else bb_size * (2 ** (i+1)) * 2
                 out_features = bb_size * 4 if i == 0 else in_features
-                self.convs.append(nn.Sequential(
-                    nn.Conv2d(in_features, out_features, kernel_size=1, bias=False), nn.BatchNorm2d(out_features), nn.LeakyReLU(negative_slope=0.2),
-                )
-            )
+                if self.hparams.preenc_IN:
+                    self.convs.append(nn.Sequential(
+                        nn.Conv2d(in_features, out_features, kernel_size=1, bias=False), nn.InstanceNorm2d(out_features), nn.LeakyReLU(negative_slope=0.2),
+                    ))
+                else:
+                    self.convs.append(nn.Sequential(
+                        nn.Conv2d(in_features, out_features, kernel_size=1, bias=False), nn.BatchNorm2d(out_features), nn.LeakyReLU(negative_slope=0.2),
+                    ))
             last_in_dim = bb_size * 2 * sum([2 ** i for i in range(1,self.depth + 1,1)])
-            self.convs.append(
-                nn.Sequential(
-                    nn.Conv1d(last_in_dim, self.latent_dim, kernel_size=1, bias=False), nn.BatchNorm1d(self.latent_dim), nn.LeakyReLU(negative_slope=0.2),
+            if self.hparams.preenc_IN:
+                self.convs.append(
+                    nn.Sequential(
+                        nn.Conv1d(last_in_dim, self.latent_dim, kernel_size=1, bias=False), nn.InstanceNorm1d(self.latent_dim), nn.LeakyReLU(negative_slope=0.2),
+                    )
                 )
-            )
+            else:
+                self.convs.append(
+                    nn.Sequential(
+                        nn.Conv1d(last_in_dim, self.latent_dim, kernel_size=1, bias=False), nn.BatchNorm1d(self.latent_dim), nn.LeakyReLU(negative_slope=0.2),
+                    )
+                )
             self.convs = nn.ModuleList(self.convs)
 
         input_latent_dim = self.latent_dim if not use_only_classification_head else self.hparams.DGCNN_latent_dim
         self.linear1 = nn.Linear(input_latent_dim * 2, bb_size * 64, bias=False)
-        self.bn6 = nn.BatchNorm1d(bb_size * 64)
+        self.bn6 = nn.BatchNorm1d(bb_size * 64) if not self.hparams.preenc_IN else nn.InstanceNorm1d(bb_size * 64)
         self.dp1 = nn.Dropout(p=self.hparams.dropout)
 
         self.linear2 = nn.Linear(bb_size * 64, bb_size * 32)
-        self.bn7 = nn.BatchNorm1d(bb_size * 32)
+        self.bn7 = nn.BatchNorm1d(bb_size * 32) if not self.hparams.preenc_IN else nn.InstanceNorm1d(bb_size * 32)
         self.dp2 = nn.Dropout(p=self.hparams.dropout)
 
         self.linear3 = nn.Linear(bb_size * 32, output_dim)

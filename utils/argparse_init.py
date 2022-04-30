@@ -166,6 +166,8 @@ def init_parse_argparse_default_params(parser, dataset_name=None, arch=None):
     parser.add_argument("--test_during_train_interval", type=int, default=4)
 
     ### Model Parameters
+    parser.add_argument("--preenc_IN", type=str2bool, nargs="?", const=True, default=False)
+    
     parser.add_argument(
         "--arch",
         "--architecture",

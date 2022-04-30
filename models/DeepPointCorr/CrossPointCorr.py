@@ -4,7 +4,7 @@ from data.point_cloud_db.point_cloud_dataset import PointCloudDataset
 from models.sub_models.dgcnn.dgcnn_modular import DGCNN_MODULAR
 from models.sub_models.dgcnn.dgcnn import get_graph_feature
 
-from models.sub_models.cross_attention.transformers import TransformerCrossEncoder
+from models.sub_models.cross_attention.transformers import TransformerCrossEncoder, MaskedTransformerCrossEncoder
 from models.sub_models.cross_attention.transformers import TransformerCrossEncoderLayer
 from models.sub_models.cross_attention.position_embedding import PositionEmbeddingCoordsSine, \
     PositionEmbeddingLearned
@@ -13,6 +13,8 @@ from models.sub_models.cross_attention.warmup import WarmUpScheduler
 from models.sub_models.ssw_loss.ssw_loss import StereoWhiteningLoss
 
 import numpy as np
+
+import math
 
 from torch.optim.lr_scheduler import MultiStepLR, StepLR
 
@@ -69,8 +71,13 @@ class CrossPointCorr(ShapeCorrTemplate):
             attention_type=self.hparams.attention_type,
         )
         self.encoder_norm = nn.LayerNorm(self.hparams.d_embed) if self.hparams.pre_norm else None
-        self.encoder_CROSS = TransformerCrossEncoder(
-            self.encoder_CROSS_layer, self.hparams.num_encoder_layers, self.encoder_norm)
+        if self.hparams.enc_type=="vanilla":
+            self.encoder_CROSS = TransformerCrossEncoder(
+                self.encoder_CROSS_layer, self.hparams.num_encoder_layers, self.encoder_norm)
+        elif self.hparams.enc_type == "masked":
+            masking_radius = [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]
+            self.encoder_CROSS = MaskedTransformerCrossEncoder(
+                self.encoder_CROSS_layer, self.hparams.num_encoder_layers, masking_radius, self.encoder_norm)
         self.pos_embed = PositionEmbeddingCoordsSine(3, self.hparams.d_embed, scale= 1.0)
         ###
         
@@ -106,7 +113,7 @@ class CrossPointCorr(ShapeCorrTemplate):
             self.scheduler = StepLR(optimizer=self.optimizer, step_size=200, gamma=0.5)
         elif self.hparams.steplr2:
             self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.slr, weight_decay=self.hparams.swd)
-            self.scheduler = StepLR(optimizer=self.optimizer, step_size=80, gamma=0.1)
+            self.scheduler = StepLR(optimizer=self.optimizer, step_size=65, gamma=0.7)
         else:
             self.optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
             self.scheduler = MultiStepLR(self.optimizer, milestones=[6, 9], gamma=0.1)
@@ -126,6 +133,8 @@ class CrossPointCorr(ShapeCorrTemplate):
             source["dense_output_features"].transpose(0,1),  target["dense_output_features"].transpose(0,1),
             src_pos=source_pe.transpose(0,1) if self.hparams.transformer_encoder_has_pos_emb else None,
             tgt_pos=target_pe.transpose(0,1) if self.hparams.transformer_encoder_has_pos_emb else None,
+            src_xyz = source["pos"],
+            tgt_xyz = target["pos"]
         )
         source["dense_output_features"] = src_out.transpose(0,1)
         target["dense_output_features"] = tgt_out.transpose(0,1)
@@ -345,6 +354,7 @@ class CrossPointCorr(ShapeCorrTemplate):
         '''
         Transformer-related args
         '''
+        parser.add_argument("--enc_type", type=str, default="vanilla", help="attention mechanism type")
         parser.add_argument("--d_embed", type=int, default=512, help="transformer embedding dim")
         parser.add_argument("--nhead", type=int, default=8, help="transformer multi-head number")
         parser.add_argument("--d_feedforward", type=int, default=1024, help="feed forward dim")
