@@ -300,7 +300,7 @@ class CrossPointCorr(ShapeCorrTemplate):
         batch = self(batch)
         p = batch["P_normalized"].clone()
         if self.hparams.use_dualsoftmax_loss:
-            temp = 1
+            temp = 0.0002
             p = p * F.softmax(p/temp, dim=0)*len(p) #With an appropriate temperature parameter, the model achieves higher performance
             p = F.log_softmax(p, dim=-1)
 
