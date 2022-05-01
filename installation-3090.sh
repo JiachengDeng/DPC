@@ -32,3 +32,6 @@ pip install torch-sparse
 pip install torch-cluster -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html
 pip install torch-spline-conv -f https://pytorch-geometric.com/whl/torch-${TORCH}+${CUDA}.html
 pip install torch-geometric
+
+cd EarthMoverDistancePytorch
+python setup.py install
