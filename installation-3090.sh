@@ -1,6 +1,7 @@
 conda create -n DPC python=3.7 -y
 conda activate DPC
 
+conda install pytorch==1.10.1 torchvision==0.11.2 torchaudio==0.10.1 cudatoolkit=11.3 -c pytorch -c conda-forge
 conda install cmake==3.22.3
 pip install pytorch-lightning==1.5.10 #1.5.10
 
