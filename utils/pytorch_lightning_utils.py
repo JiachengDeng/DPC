@@ -11,6 +11,7 @@ def load_params_from_checkpoint(hparams, parser):
         setattr(hparams_model,k,v)
     hparams_model.show_vis = hparams.show_vis
     hparams_model.gpus = hparams.gpus
+    hparams_model.default_root_dir = hparams.default_root_dir  ##Avoid changing the root directory
     for key in vars(hparams):
         if(key not in vars(hparams_model)):
             setattr(hparams_model,key,getattr(hparams,key,None))
