@@ -107,7 +107,9 @@ python train_point_corr.py --show_vis --do_train false --resume_from_checkpoint 
 TypeError: on_train_epoch_end() missing 1 required positional argument: 'outputs'
 ```
 Reference: [PyTorch-Lightning](https://github.com/williamFalcon/pytorch-lightning-vae/issues/7)
-Solve: ![debug](./data/images/debug.png)
+
+Solve: anaconda3/envs/DPC/lib/python3.7/site-packages/pytorch_lightning/trainer/trainer.py", line 1501
+![debug](./data/images/debug.png)
 
 # Citing & Authors
 If you find this repository helpful feel free to cite our publication -
