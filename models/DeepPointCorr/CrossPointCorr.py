@@ -10,7 +10,7 @@ from models.sub_models.cross_attention.position_embedding import PositionEmbeddi
     PositionEmbeddingLearned
 from models.sub_models.cross_attention.warmup import WarmUpScheduler
 
-from models.sub_models.ssw_loss.ssw_loss import StereoWhiteningLoss
+from models.sub_models.ssw_loss.ssw_loss import StereoWhiteningLoss, ShapeWhiteningLoss
 
 import numpy as np
 
@@ -82,7 +82,10 @@ class CrossPointCorr(ShapeCorrTemplate):
         ###
         
         ###Shape Selective whitening
-        self.loss_stereo_ssw = StereoWhiteningLoss()
+        if self.hparams.old_ssw:
+            self.loss_stereo_ssw = StereoWhiteningLoss()
+        else:
+            self.loss_stereo_ssw = ShapeWhiteningLoss()
         ###
 
         self.chamfer_dist_3d = dist_chamfer_3D.chamfer_3DDist()
@@ -286,7 +289,7 @@ class CrossPointCorr(ShapeCorrTemplate):
             self.losses[f"neigh_loss_bac"] = self.hparams.neigh_loss_lambda * data[f"neigh_loss_bac_unscaled"]
 
         #TODO: change current epoch
-        if self.hparams.compute_ssw_loss and self.hparams.ssw_loss_lambda > 0.0 and self.current_epoch > self.hparams.max_epochs-50:
+        if self.hparams.compute_ssw_loss and self.hparams.ssw_loss_lambda > 0.0 and self.current_epoch >= self.hparams.max_epochs-50:
             cov_list=self.loss_stereo_ssw.cal_cov([data["source"]["intermediate_features"],data["target"]["intermediate_features"]])
             data[f"ssw_loss"] = self.loss_stereo_ssw(data["source"]["intermediate_features"], cov_list=cov_list, weight=10.0)
             
@@ -375,6 +378,7 @@ class CrossPointCorr(ShapeCorrTemplate):
         '''
         Shape Selective Whitening Loss-related args
         '''
+        parser.add_argument("--old_ssw", nargs="?", default=False, type=str2bool, const=True, help="whether to use old shape whitening loss(similar to stereowhiteningloss)")
         parser.add_argument("--compute_ssw_loss", nargs="?", default=False, type=str2bool, const=True, help="whether to compute shape selective whitening loss")
         parser.add_argument("--ssw_loss_lambda", type=float, default=3.0, help="weight for SSW loss")
         
