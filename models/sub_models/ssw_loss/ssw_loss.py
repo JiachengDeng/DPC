@@ -91,7 +91,7 @@ class ShapeWhiteningLoss(object):
 
 
 
-    def __call__(self, l_w_arr, cov_list, weight=0.6):
+    def __call__(self, l_w_arr, cov_list, weight=1):
         wt_loss  = 0
         for idx in range(len(l_w_arr)):
             feats_l = l_w_arr[idx].transpose(1,2)
@@ -103,7 +103,7 @@ class ShapeWhiteningLoss(object):
             eye = torch.eye(c, c).cuda()
             reversal_eye = torch.ones(c, c).triu(diagonal=1).cuda()
 
-            cov_matrix = cov_list[idx]
+            cov_matrix, conf_dist = cov_list[idx]
 
             var_flatten = cov_matrix.flatten()
             # clusters, centroids = kmeans1d.cluster(var_flatten, self.clusters)
@@ -117,8 +117,12 @@ class ShapeWhiteningLoss(object):
             mask_matrix = mask_matrix.view(B, dim, dim).contiguous()
             mask_matrix = mask_matrix * reversal_eye
             num_sensitive_sum = torch.sum(mask_matrix)
-            loss = self.instance_whitening_loss(cov_matrix, mask_matrix, num_remove_cov=num_sensitive_sum)
-            wt_loss += loss
+            loss1 = self.instance_whitening_loss(cov_matrix, mask_matrix, num_remove_cov=num_sensitive_sum)
+            wt_loss += loss1
+            print(loss1)
+            loss2 = self.first_order_loss(conf_dist)
+            print(loss2)
+            wt_loss += weight*loss2
         
         wt_loss = wt_loss / len(l_w_arr)
 
@@ -163,13 +167,13 @@ class ShapeWhiteningLoss(object):
             
             #add detail confidence
             conf_dist = self.cal_cd(mask_feats_l, mask_feats_r)
-            conf_matrix = torch.matmul(conf_dist.unsqueeze(2),conf_dist.unsqueeze(1))
+            conf_dist = torch.sum(conf_dist, dim=0)/B
             
             assert V == 2
-            variance_of_covariance = torch.mul(torch.var(off_diag_elements, dim=0), conf_matrix)
+            variance_of_covariance = torch.var(off_diag_elements, dim=0)
             variance_of_covariance = torch.sum(variance_of_covariance, dim=0)/B
             
-            cov_list.append(variance_of_covariance)
+            cov_list.append((variance_of_covariance,conf_dist))
         
         return cov_list
     
@@ -178,5 +182,10 @@ class ShapeWhiteningLoss(object):
         off_diag_sum = torch.sum(torch.abs(f_cor_masked), dim=(1,2), keepdim=True) # B X 1 X 1
         loss = torch.clamp(torch.div(off_diag_sum, num_remove_cov), min=0) # B X 1 X 1
         loss = torch.sum(loss)
+        
+        return loss
+    
+    def first_order_loss(self, conf_dist):
+        loss = torch.sum(conf_dist)
         
         return loss
