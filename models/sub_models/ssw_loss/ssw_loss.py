@@ -119,9 +119,7 @@ class ShapeWhiteningLoss(object):
             num_sensitive_sum = torch.sum(mask_matrix)
             loss1 = self.instance_whitening_loss(cov_matrix, mask_matrix, num_remove_cov=num_sensitive_sum)
             wt_loss += loss1
-            print(loss1)
             loss2 = self.first_order_loss(conf_dist)
-            print(loss2)
             wt_loss += weight*loss2
         
         wt_loss = wt_loss / len(l_w_arr)
