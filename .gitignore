@@ -31,7 +31,9 @@ data/datasets/surreal/*
 data/ckpts/
 !data/surreal_template.ply
 
-/EarthMoverDistancePytorch/build/*
-/EarthMoverDistancePytorch/emd.egg-info/*
-/EarthMoverDistancePytorch/dist/*
-/EarthMoverDistancePytorch/__pycache__/*
+ChamferDistancePytorch/
+
+EarthMoverDistancePytorch/build/*
+EarthMoverDistancePytorch/emd.egg-info/*
+EarthMoverDistancePytorch/dist/*
+EarthMoverDistancePytorch/__pycache__/*
