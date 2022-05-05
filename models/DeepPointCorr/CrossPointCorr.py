@@ -59,7 +59,10 @@ class CrossPointCorr(ShapeCorrTemplate):
     def __init__(self, hparams, **kwargs):
         """Stub."""
         super(CrossPointCorr, self).__init__(hparams, **kwargs)
-        self.encoder_DGCNN = DGCNN_MODULAR(self.hparams, use_inv_features=self.hparams.use_inv_features,return_inter="compute_ssw_loss" in self.hparams and self.hparams.compute_ssw_loss)
+        if self.hparams.use_preenc:
+            self.encoder_DGCNN = DGCNN_MODULAR(self.hparams, use_inv_features=self.hparams.use_inv_features,return_inter="compute_ssw_loss" in self.hparams and self.hparams.compute_ssw_loss)
+        else:
+            self.preenc = nn.Sequential(nn.Linear(3, self.hparams.d_embed//4), nn.ReLU(True), nn.Linear(self.hparams.d_embed//4, self.hparams.d_embed), nn.ReLU(True))
         
         ###transformer
         self.encoder_CROSS_layer = TransformerCrossEncoderLayer(
@@ -75,7 +78,9 @@ class CrossPointCorr(ShapeCorrTemplate):
             self.encoder_CROSS = TransformerCrossEncoder(
                 self.encoder_CROSS_layer, self.hparams.num_encoder_layers, self.encoder_norm)
         elif self.hparams.enc_type == "masked":
-            masking_radius = [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]
+            # masking_radius = [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]
+            masking_radius = [math.pow(x, 2) for x in [0.2, 0.8, 0.0]]
+            # masking_radius = [math.pow(x, 2) for x in [0.1, 0.3, 0.8, 0.0]]
             self.encoder_CROSS = MaskedTransformerCrossEncoder(
                 self.encoder_CROSS_layer, self.hparams.num_encoder_layers, masking_radius, self.encoder_norm)
         self.pos_embed = PositionEmbeddingCoordsSine(3, self.hparams.d_embed, scale= 1.0)
@@ -144,9 +149,13 @@ class CrossPointCorr(ShapeCorrTemplate):
         return source, target
 
     def forward_source_target(self, source, target):
-        for shape in [source, target]:
-            shape = self.compute_deep_features(shape) #shape.keys()=keys(['pos', 'id', 'd_max', 'rand_choice', 'edge_index', 'neigh_idxs', 'dense_output_features'])
-                                                      # shape["dense_output_features"]=[BatchSize, num_points, embed_dim]
+        if self.hparams.use_preenc:
+            for shape in [source, target]:
+                shape = self.compute_deep_features(shape) #shape.keys()=keys(['pos', 'id', 'd_max', 'rand_choice', 'edge_index', 'neigh_idxs', 'dense_output_features'])
+                                                        # shape["dense_output_features"]=[BatchSize, num_points, embed_dim]
+        else:
+            source["dense_output_features"] = self.preenc(source["pos"])
+            target["dense_output_features"] = self.preenc(target["pos"])
         
         ###transformers     
         source, target = self.compute_cross_features(source, target)
@@ -353,6 +362,11 @@ class CrossPointCorr(ShapeCorrTemplate):
         parser.add_argument("--use_euclidiean_in_self_recon", nargs="?", default=False, type=str2bool, const=True, help="whether to use self reconstruction")
         parser.add_argument("--use_all_neighs_for_cross_reco", nargs="?", default=False, type=str2bool, const=True, help="whether to use self reconstruction")
         parser.add_argument("--use_all_neighs_for_self_reco", nargs="?", default=False, type=str2bool, const=True, help="whether to use self reconstruction")
+        
+        '''
+        PreEncoder-related args
+        '''
+        parser.add_argument("--use_preenc", nargs="?", default=True, type=str2bool, const=False, help="whether to use DGCNN pre-encoder")
         
         '''
         Transformer-related args
