@@ -4,8 +4,8 @@ from data.point_cloud_db.point_cloud_dataset import PointCloudDataset
 from models.sub_models.dgcnn.dgcnn_modular import DGCNN_MODULAR
 from models.sub_models.dgcnn.dgcnn import get_graph_feature
 
-from models.sub_models.cross_attention.transformers import TransformerCrossEncoder, MaskedTransformerCrossEncoder
-from models.sub_models.cross_attention.transformers import TransformerCrossEncoderLayer
+from models.sub_models.cross_attention.transformers import FlexibleTransformerEncoder, MaskedTransformerCrossEncoder
+from models.sub_models.cross_attention.transformers import TransformerSelfLayer, TransformerCrossLayer
 from models.sub_models.cross_attention.position_embedding import PositionEmbeddingCoordsSine, \
     PositionEmbeddingLearned
 from models.sub_models.cross_attention.warmup import WarmUpScheduler
@@ -62,7 +62,16 @@ class TransPointCorr(ShapeCorrTemplate):
         self.preenc = nn.Sequential(nn.Linear(3, self.hparams.d_embed//4), nn.ReLU(True), nn.Linear(self.hparams.d_embed//4, self.hparams.d_embed), nn.ReLU(True))
         
         ###transformer
-        self.encoder_CROSS_layer = TransformerCrossEncoderLayer(
+        self.encoder_self_layer = TransformerSelfLayer(
+            self.hparams.d_embed, self.hparams.nhead, self.hparams.d_feedforward, self.hparams.dropout,
+            activation=self.hparams.transformer_act,
+            normalize_before=self.hparams.pre_norm,
+            sa_val_has_pos_emb=self.hparams.sa_val_has_pos_emb,
+            ca_val_has_pos_emb=self.hparams.ca_val_has_pos_emb,
+            attention_type=self.hparams.attention_type,
+        )
+
+        self.encoder_cross_layer = TransformerCrossLayer(
             self.hparams.d_embed, self.hparams.nhead, self.hparams.d_feedforward, self.hparams.dropout,
             activation=self.hparams.transformer_act,
             normalize_before=self.hparams.pre_norm,
@@ -71,15 +80,12 @@ class TransPointCorr(ShapeCorrTemplate):
             attention_type=self.hparams.attention_type,
         )
         self.encoder_norm = nn.LayerNorm(self.hparams.d_embed) if self.hparams.pre_norm else None
-        if self.hparams.enc_type=="vanilla":
-            self.encoder_CROSS = TransformerCrossEncoder(
-                self.encoder_CROSS_layer, self.hparams.num_encoder_layers, self.encoder_norm)
-        elif self.hparams.enc_type == "masked":
-            # masking_radius = [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]
-            # masking_radius = [math.pow(x, 2) for x in [0.2, 0.8, 0.0]]
-            masking_radius = {"2": [math.pow(x, 2) for x in [0.2, 0.0]], "3":[math.pow(x, 2) for x in [0.2, 0.8, 0.0]], "4":[math.pow(x, 2) for x in [0.1, 0.3, 0.8, 0.0]], "6": [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]}
-            self.encoder_CROSS = MaskedTransformerCrossEncoder(
-                self.encoder_CROSS_layer, self.hparams.num_encoder_layers, masking_radius[str(self.hparams.num_encoder_layers)], self.encoder_norm)
+
+        masking_radius = {"2": [math.pow(x, 2) for x in [0.2, 0.0]], "3":[math.pow(x, 2) for x in [0.2, 0.8, 0.0]], "4":[math.pow(x, 2) for x in [0.1, 0.3, 0.8, 0.0]], "6": [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]}
+        
+        self.encoder_CROSS = FlexibleTransformerEncoder(
+            self.encoder_self_layer, self.encoder_cross_layer, self.hparams.layer_list, masking_radius[str(self.hparams.layer_list.count('s'))], self.encoder_norm)
+        
         self.pos_embed = PositionEmbeddingCoordsSine(3, self.hparams.d_embed, scale= 1.0)
         ###
         
@@ -381,6 +387,7 @@ class TransPointCorr(ShapeCorrTemplate):
         parser.add_argument("--steplr2", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR2")
         parser.add_argument("--slr", type=float, default= 5e-4, help="steplr learning rate")
         parser.add_argument("--swd", default=5e-4, type=float, help="steplr2 weight decay")
+        parser.add_argument("--layer_list", type=list, default=['s', 'c', 's', 'c', 's', 'c', 's', 'c'], help="encoder layer list")
         
         '''
         Shape Selective Whitening Loss-related args
