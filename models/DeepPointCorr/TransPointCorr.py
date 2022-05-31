@@ -82,9 +82,10 @@ class TransPointCorr(ShapeCorrTemplate):
         self.encoder_norm = nn.LayerNorm(self.hparams.d_embed) if self.hparams.pre_norm else None
 
         masking_radius = {"2": [math.pow(x, 2) for x in [0.2, 0.0]], "3":[math.pow(x, 2) for x in [0.2, 0.8, 0.0]], "4":[math.pow(x, 2) for x in [0.1, 0.3, 0.8, 0.0]], "6": [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]}
+        # masking_radius = {"2": [math.pow(x, 2) for x in [0.2, 0.0]], "3":[math.pow(x, 2) for x in [0.1, 0.1, 0.1]], "4":[math.pow(x, 2) for x in [0.1, 0.1, 0.1, 0.1]], "6": [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]}
         
         self.encoder_CROSS = FlexibleTransformerEncoder(
-            self.encoder_self_layer, self.encoder_cross_layer, self.hparams.layer_list, masking_radius[str(self.hparams.layer_list.count('s'))], self.encoder_norm)
+            self.encoder_self_layer, self.encoder_cross_layer, self.hparams.layer_list, masking_radius[str(self.hparams.layer_list.count('s'))], self.encoder_norm, self.hparams.compute_ssw_loss)
         
         self.pos_embed = PositionEmbeddingCoordsSine(3, self.hparams.d_embed, scale= 1.0)
         ###
@@ -147,8 +148,16 @@ class TransPointCorr(ShapeCorrTemplate):
             src_xyz = source["pos"],
             tgt_xyz = target["pos"]
         )
-        source["dense_output_features"] = src_out.transpose(0,1)
-        target["dense_output_features"] = tgt_out.transpose(0,1)
+        
+        if self.hparams.compute_ssw_loss:
+            source["dense_output_features"] = src_out[-1].transpose(0,1)
+            target["dense_output_features"] = tgt_out[-1].transpose(0,1)
+            source["intermediate_features"] = [src_out[i].transpose(0,1) for i in range(src_out.shape[0])]
+            target["intermediate_features"] = [tgt_out[i].transpose(0,1) for i in range(tgt_out.shape[0])]
+        else:
+            source["dense_output_features"] = src_out.transpose(0,1)
+            target["dense_output_features"] = tgt_out.transpose(0,1)
+        
         return source, target
 
     def forward_source_target(self, source, target):
@@ -297,11 +306,11 @@ class TransPointCorr(ShapeCorrTemplate):
             self.losses[f"neigh_loss_bac"] = self.hparams.neigh_loss_lambda * data[f"neigh_loss_bac_unscaled"]
 
         #TODO: change current epoch
-        # if self.hparams.compute_ssw_loss and self.hparams.ssw_loss_lambda > 0.0 and self.current_epoch >= self.hparams.max_epochs-100:
-        #     cov_list=self.loss_stereo_ssw.cal_cov([data["source"]["intermediate_features"],data["target"]["intermediate_features"]])
-        #     data[f"ssw_loss"] = self.loss_stereo_ssw(data["source"]["intermediate_features"], cov_list=cov_list, weight=0.01)
+        if self.hparams.compute_ssw_loss and self.hparams.ssw_loss_lambda > 0.0 and self.current_epoch >= self.hparams.max_epochs-100:
+            cov_list=self.loss_stereo_ssw.cal_cov([data["source"]["intermediate_features"],data["target"]["intermediate_features"]])
+            data[f"ssw_loss"] = self.loss_stereo_ssw(data["source"]["intermediate_features"], cov_list=cov_list, weight=0.01)
             
-        #     self.losses[f"source_ssw_loss"] = self.hparams.ssw_loss_lambda * data[f"ssw_loss"]
+            self.losses[f"source_ssw_loss"] = self.hparams.ssw_loss_lambda * data[f"ssw_loss"]
 
         self.track_metrics(data)
 
