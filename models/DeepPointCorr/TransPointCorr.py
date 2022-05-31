@@ -82,6 +82,7 @@ class TransPointCorr(ShapeCorrTemplate):
         self.encoder_norm = nn.LayerNorm(self.hparams.d_embed) if self.hparams.pre_norm else None
 
         masking_radius = {"2": [math.pow(x, 2) for x in [0.2, 0.0]], "3":[math.pow(x, 2) for x in [0.2, 0.8, 0.0]], "4":[math.pow(x, 2) for x in [0.1, 0.3, 0.8, 0.0]], "6": [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]}
+        # masking_radius = {"2": [math.pow(x, 2) for x in [0.2, 0.0]], "3":[math.pow(x, 2) for x in [0.0, 0.0, 0.0]], "4":[math.pow(x, 2) for x in [0.1, 0.3, 0.8, 0.0]], "6": [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]}
         
         self.encoder_CROSS = FlexibleTransformerEncoder(
             self.encoder_self_layer, self.encoder_cross_layer, self.hparams.layer_list, masking_radius[str(self.hparams.layer_list.count('s'))], self.encoder_norm)
@@ -259,6 +260,17 @@ class TransPointCorr(ShapeCorrTemplate):
         # dense features, similarity, and cross reconstruction
         data["source"], data["target"], data["P_normalized"], data["temperature"] = self.forward_source_target(data["source"], data["target"])
 
+        # ### For visualizations
+        # if self.hparams.mode == "val":
+        #     p_cpu = data["P_normalized"].data.cpu().numpy()
+        #     source_xyz = data["source"]["pos"].data.cpu().numpy()
+        #     target_xyz = data["target"]["pos"].data.cpu().numpy()
+        #     # label_cpu = label.data.cpu().numpy()
+        #     np.save("./smal-val/p_{}".format(self.hparams.batch_idx), p_cpu)
+        #     np.save("./smal-val/source_{}".format(self.hparams.batch_idx), source_xyz)
+        #     np.save("./smal-val/target_{}".format(self.hparams.batch_idx), target_xyz)
+        #     # np.save("./smal-test/label_{}".format(batch_idx), label_cpu)
+        # ###
 
 
         # cross reconstruction losses
@@ -319,6 +331,18 @@ class TransPointCorr(ShapeCorrTemplate):
         batch = {"source": source, "target": target}
         batch = self(batch)
         p = batch["P_normalized"].clone()
+        
+        # ### For visualization
+        # p_cpu = p.data.cpu().numpy()
+        # source_xyz = pinput1.data.cpu().numpy()
+        # target_xyz = input2.data.cpu().numpy()
+        # label_cpu = label.data.cpu().numpy()
+        # np.save("./smal-test/p_{}".format(batch_idx), p_cpu)
+        # np.save("./smal-test/source_{}".format(batch_idx), source_xyz)
+        # np.save("./smal-test/target_{}".format(batch_idx), target_xyz)
+        # np.save("./smal-test/label_{}".format(batch_idx), label_cpu)
+        # ###
+        
         if self.hparams.use_dualsoftmax_loss:
             temp = 0.0002
             p = p * F.softmax(p/temp, dim=0)*len(p) #With an appropriate temperature parameter, the model achieves higher performance

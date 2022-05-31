@@ -183,6 +183,17 @@ class DeepPointCorr(ShapeCorrTemplate):
         # dense features, similarity, and cross reconstruction
         data["source"], data["target"], data["P_normalized"], data["temperature"] = self.forward_source_target(data["source"], data["target"])
 
+        # ### For visualizations
+        # if self.hparams.mode == "val":
+        #     p_cpu = data["P_normalized"].data.cpu().numpy()
+        #     source_xyz = data["source"]["pos"].data.cpu().numpy()
+        #     target_xyz = data["target"]["pos"].data.cpu().numpy()
+        #     # label_cpu = label.data.cpu().numpy()
+        #     np.save("./smal-val/p_{}".format(self.hparams.batch_idx), p_cpu)
+        #     np.save("./smal-val/source_{}".format(self.hparams.batch_idx), source_xyz)
+        #     np.save("./smal-val/target_{}".format(self.hparams.batch_idx), target_xyz)
+        #     # np.save("./smal-test/label_{}".format(batch_idx), label_cpu)
+        # ###
 
 
         # cross reconstruction losses
@@ -237,7 +248,16 @@ class DeepPointCorr(ShapeCorrTemplate):
         batch = self(batch)
         p = batch["P_normalized"].clone()
 
-
+        ### For visualization
+        p_cpu = p.data.cpu().numpy()
+        source_xyz = pinput1.data.cpu().numpy()
+        target_xyz = input2.data.cpu().numpy()
+        label_cpu = label.data.cpu().numpy()
+        np.save("./Deep-smal-test/p_{}".format(batch_idx), p_cpu)
+        np.save("./Deep-smal-test/source_{}".format(batch_idx), source_xyz)
+        np.save("./Deep-smal-test/target_{}".format(batch_idx), target_xyz)
+        np.save("./Deep-smal-test/label_{}".format(batch_idx), label_cpu)
+        ###
 
         _ = self.compute_acc(label, ratio_list, soft_labels, p,input2,track_dict=self.tracks,hparams=self.hparams)
 

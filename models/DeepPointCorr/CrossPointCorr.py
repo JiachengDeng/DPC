@@ -80,6 +80,7 @@ class CrossPointCorr(ShapeCorrTemplate):
         elif self.hparams.enc_type == "masked":
             # masking_radius = [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]
             masking_radius = [math.pow(x, 2) for x in [0.2, 0.8, 0.0]]
+            # masking_radius = [math.pow(x, 2) for x in [0.2, 0.0]]
             # masking_radius = [math.pow(x, 2) for x in [0.1, 0.3, 0.8, 0.0]]
             self.encoder_CROSS = MaskedTransformerCrossEncoder(
                 self.encoder_CROSS_layer, self.hparams.num_encoder_layers, masking_radius, self.encoder_norm)
@@ -125,6 +126,7 @@ class CrossPointCorr(ShapeCorrTemplate):
         else:
             self.optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
             self.scheduler = MultiStepLR(self.optimizer, milestones=[6, 9], gamma=0.1)
+
         return [self.optimizer], [self.scheduler]
 
     def compute_deep_features(self, shape):
