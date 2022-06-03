@@ -31,6 +31,9 @@ def model_class_pointer(task_name, model_name):
         elif model_name == 'TransPointCorr':
             from models.DeepPointCorr.TransPointCorr import TransPointCorr
             return TransPointCorr
+        elif model_name == 'LuckPointCorr':
+            from models.DeepPointCorr.LuckPointCorr import LuckPointCorr
+            return LuckPointCorr
             
 
     raise Exception("Unkown arch")

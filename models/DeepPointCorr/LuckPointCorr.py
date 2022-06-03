@@ -4,9 +4,19 @@ from data.point_cloud_db.point_cloud_dataset import PointCloudDataset
 from models.sub_models.dgcnn.dgcnn_modular import DGCNN_MODULAR
 from models.sub_models.dgcnn.dgcnn import get_graph_feature
 
+from models.sub_models.cross_attention.transformers import FlexibleTransformerEncoder, LuckTransformerEncoder
+from models.sub_models.cross_attention.transformers import TransformerSelfLayer, TransformerCrossLayer, LuckSelfLayer
+from models.sub_models.cross_attention.position_embedding import PositionEmbeddingCoordsSine, \
+    PositionEmbeddingLearned
+from models.sub_models.cross_attention.warmup import WarmUpScheduler
+
+from models.sub_models.ssw_loss.ssw_loss import StereoWhiteningLoss, ShapeWhiteningLoss
+
 import numpy as np
 
-from torch.optim.lr_scheduler import MultiStepLR
+import math
+
+from torch.optim.lr_scheduler import MultiStepLR, StepLR
 
 from torch_cluster import knn
 import pointnet2_ops._ext as _ext
@@ -17,6 +27,7 @@ from models.metrics.metrics import AccuracyAssumeEye, AccuracyAssumeEyeSoft, uni
 from utils import switch_functions
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from models.sub_models.dgcnn.dgcnn import DGCNN as non_geo_DGCNN
@@ -43,12 +54,25 @@ class GroupingOperation(torch.autograd.Function):
 
 grouping_operation = GroupingOperation.apply
 
-class DeepPointCorr(ShapeCorrTemplate):
+class LuckPointCorr(ShapeCorrTemplate):
     
     def __init__(self, hparams, **kwargs):
         """Stub."""
-        super(DeepPointCorr, self).__init__(hparams, **kwargs)
-        self.encoder = DGCNN_MODULAR(self.hparams, use_inv_features=self.hparams.use_inv_features)
+        super(LuckPointCorr, self).__init__(hparams, **kwargs)
+        
+        self.encoder_norm = nn.LayerNorm(self.hparams.d_embed) if self.hparams.pre_norm else None
+        
+        self.encoder_CROSS = LuckTransformerEncoder(hparams, self.hparams.layer_list, self.encoder_norm, True)
+        
+        self.pos_embed = PositionEmbeddingCoordsSine(3, self.hparams.d_embed, scale= 1.0)
+        ###
+        
+        ###Shape Selective whitening
+        if self.hparams.old_ssw:
+            self.loss_stereo_ssw = StereoWhiteningLoss()
+        else:
+            self.loss_stereo_ssw = ShapeWhiteningLoss()
+        ###
 
         self.chamfer_dist_3d = dist_chamfer_3D.chamfer_3DDist()
 
@@ -70,19 +94,48 @@ class DeepPointCorr(ShapeCorrTemplate):
         return loss
 
     def configure_optimizers(self):
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
-        self.scheduler = MultiStepLR(self.optimizer, milestones=[6, 9], gamma=0.1)
+        if self.hparams.warmup:
+            self.optimizer = torch.optim.Adam(self.parameters(), lr=0.0, weight_decay=0.0001)
+            self.scheduler = WarmUpScheduler(self.optimizer, [28800, 28800, 0.5], 0.0001)
+        elif self.hparams.steplr:
+            self.optimizer = torch.optim.AdamW(self.parameters(), lr=0.0001, weight_decay=0.0001)
+            self.scheduler = StepLR(optimizer=self.optimizer, step_size=200, gamma=0.5)
+        elif self.hparams.steplr2:
+            self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.slr, weight_decay=self.hparams.swd)
+            self.scheduler = StepLR(optimizer=self.optimizer, step_size=65, gamma=0.7)
+        else:
+            self.optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+            self.scheduler = MultiStepLR(self.optimizer, milestones=[6, 9], gamma=0.1)
         return [self.optimizer], [self.scheduler]
 
-    def compute_deep_features(self, shape):
-        shape["dense_output_features"] = self.encoder.forward_per_point(
-            shape["pos"], start_neighs=shape["neigh_idxs"]
+    # def compute_deep_features(self, shape):
+    #     if self.hparams.compute_ssw_loss:
+    #         shape["dense_output_features"], shape["intermediate_features"] = self.encoder_DGCNN.forward_per_point(shape["pos"], start_neighs=shape["neigh_idxs"])
+    #     else:
+    #         shape["dense_output_features"] = self.encoder_DGCNN.forward_per_point(shape["pos"], start_neighs=shape["neigh_idxs"])
+    #     return shape
+    
+    def compute_self_features(self, source, target): 
+        source_pe=self.pos_embed(source["pos"].reshape(-1,3)).reshape(-1,1024,self.hparams.d_embed)
+        target_pe=self.pos_embed(target["pos"].reshape(-1,3)).reshape(-1,1024,self.hparams.d_embed)
+        src_out, tgt_out = self.encoder_CROSS(
+            source["pos"].transpose(0,1),  target["pos"].transpose(0,1),
+            src_xyz = source["pos"],
+            tgt_xyz = target["pos"],
+            src_neigh = source["neigh_idxs"],
+            tgt_neigh = target["neigh_idxs"],
         )
-        return shape
+        
+        source["dense_output_features"] = src_out.transpose(1,2)
+        target["dense_output_features"] = tgt_out.transpose(1,2)
+        
+        return source, target
 
     def forward_source_target(self, source, target):
-        for shape in [source, target]:
-            shape = self.compute_deep_features(shape)
+        
+        ###transformers     
+        source, target = self.compute_self_features(source, target)
+        ###
 
         # measure cross similarity
         P_non_normalized = switch_functions.measure_similarity(self.hparams.similarity_init, source["dense_output_features"], target["dense_output_features"])
@@ -231,6 +284,13 @@ class DeepPointCorr(ShapeCorrTemplate):
             self.losses[f"neigh_loss_fwd"] = self.hparams.neigh_loss_lambda * data[f"neigh_loss_fwd_unscaled"]
             self.losses[f"neigh_loss_bac"] = self.hparams.neigh_loss_lambda * data[f"neigh_loss_bac_unscaled"]
 
+        #TODO: change current epoch
+        if self.hparams.compute_ssw_loss and self.hparams.ssw_loss_lambda > 0.0 and self.current_epoch >= self.hparams.max_epochs-100:
+            cov_list=self.loss_stereo_ssw.cal_cov([data["source"]["intermediate_features"],data["target"]["intermediate_features"]])
+            data[f"ssw_loss"] = self.loss_stereo_ssw(data["source"]["intermediate_features"], cov_list=cov_list, weight=0.01)
+            
+            self.losses[f"source_ssw_loss"] = self.hparams.ssw_loss_lambda * data[f"ssw_loss"]
+
         self.track_metrics(data)
 
         return data
@@ -247,17 +307,23 @@ class DeepPointCorr(ShapeCorrTemplate):
         batch = {"source": source, "target": target}
         batch = self(batch)
         p = batch["P_normalized"].clone()
+        
+        # ### For visualization
+        # p_cpu = p.data.cpu().numpy()
+        # source_xyz = pinput1.data.cpu().numpy()
+        # target_xyz = input2.data.cpu().numpy()
+        # label_cpu = label.data.cpu().numpy()
+        # np.save("./smal-test/p_{}".format(batch_idx), p_cpu)
+        # np.save("./smal-test/source_{}".format(batch_idx), source_xyz)
+        # np.save("./smal-test/target_{}".format(batch_idx), target_xyz)
+        # np.save("./smal-test/label_{}".format(batch_idx), label_cpu)
+        # ###
+        
+        if self.hparams.use_dualsoftmax_loss:
+            temp = 0.0002
+            p = p * F.softmax(p/temp, dim=0)*len(p) #With an appropriate temperature parameter, the model achieves higher performance
+            p = F.log_softmax(p, dim=-1)
 
-        ### For visualization
-        p_cpu = p.data.cpu().numpy()
-        source_xyz = pinput1.data.cpu().numpy()
-        target_xyz = input2.data.cpu().numpy()
-        label_cpu = label.data.cpu().numpy()
-        np.save("./Deep-smal-test/p_{}".format(batch_idx), p_cpu)
-        np.save("./Deep-smal-test/source_{}".format(batch_idx), source_xyz)
-        np.save("./Deep-smal-test/target_{}".format(batch_idx), target_xyz)
-        np.save("./Deep-smal-test/label_{}".format(batch_idx), label_cpu)
-        ###
 
         _ = self.compute_acc(label, ratio_list, soft_labels, p,input2,track_dict=self.tracks,hparams=self.hparams)
 
@@ -295,17 +361,55 @@ class DeepPointCorr(ShapeCorrTemplate):
         parser.add_argument("--use_euclidiean_in_self_recon", nargs="?", default=False, type=str2bool, const=True, help="whether to use self reconstruction")
         parser.add_argument("--use_all_neighs_for_cross_reco", nargs="?", default=False, type=str2bool, const=True, help="whether to use self reconstruction")
         parser.add_argument("--use_all_neighs_for_self_reco", nargs="?", default=False, type=str2bool, const=True, help="whether to use self reconstruction")
+        
+        '''
+        PreEncoder-related args
+        '''
+        parser.add_argument("--use_preenc", nargs="?", default=True, type=str2bool, const=False, help="whether to use DGCNN pre-encoder")
+        
+        '''
+        Transformer-related args
+        '''
+        parser.add_argument("--enc_type", type=str, default="vanilla", help="attention mechanism type")
+        parser.add_argument("--d_embed", type=int, default=512, help="transformer embedding dim")
+        parser.add_argument("--nhead", type=int, default=8, help="transformer multi-head number")
+        parser.add_argument("--d_feedforward", type=int, default=1024, help="feed forward dim")
+        parser.add_argument("--dropout", type=float, default=0.0, help="dropout")
+        parser.add_argument("--transformer_act", type=str, default="relu", help="activation function in transformer")
+        parser.add_argument("--pre_norm", nargs="?", default=True, type=str2bool, const=False, help="whether to use prenormalization")
+        parser.add_argument("--sa_val_has_pos_emb", nargs="?", default=True, type=str2bool, const=False, help="position embedding in self-attention")
+        parser.add_argument("--ca_val_has_pos_emb", nargs="?", default=True, type=str2bool, const=False, help="position embedding in cross-attention")
+        parser.add_argument("--attention_type", type=str, default="dot_prod", help="attention mechanism type")
+        parser.add_argument("--num_encoder_layers", type=int, default=6, help="the number of transformer encoder layers")
+        parser.add_argument("--transformer_encoder_has_pos_emb", nargs="?", default=True, type=str2bool, const=False, help="whether to use position embedding in transformer encoder")
+        parser.add_argument("--warmup", nargs="?", default=False, type=str2bool, const=True, help="whether to use warmup")
+        parser.add_argument("--steplr", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR")
+        parser.add_argument("--steplr2", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR2")
+        parser.add_argument("--slr", type=float, default= 5e-4, help="steplr learning rate")
+        parser.add_argument("--swd", default=5e-4, type=float, help="steplr2 weight decay")
+        parser.add_argument("--layer_list", type=list, default=['s', 'c', 's', 'c', 's', 'c', 's', 'c'], help="encoder layer list")
+        
+        '''
+        Shape Selective Whitening Loss-related args
+        '''
+        parser.add_argument("--old_ssw", nargs="?", default=False, type=str2bool, const=True, help="whether to use old shape whitening loss(similar to stereowhiteningloss)")
+        parser.add_argument("--compute_ssw_loss", nargs="?", default=False, type=str2bool, const=True, help="whether to compute shape selective whitening loss")
+        parser.add_argument("--ssw_loss_lambda", type=float, default=3.0, help="weight for SSW loss")
+        
+        '''
+        Dual Softmax Loss-related args
+        '''
+        parser.add_argument("--use_dualsoftmax_loss", nargs="?", default=False, type=str2bool, const=True, help="whether to use dual softmax loss")
 
         parser.set_defaults(
             optimizer="adam",
             lr=0.0003,
             weight_decay=5e-4,
-            max_epochs=300, #max_epochs=300,
+            max_epochs=300, 
             accumulate_grad_batches=2,
             latent_dim=768,
-            DGCNN_latent_dim=512,
             bb_size=24,
-            num_neighs=27, #num_neighs=27
+            num_neighs=27,
 
             val_vis_interval=20,
             test_vis_interval=20,
