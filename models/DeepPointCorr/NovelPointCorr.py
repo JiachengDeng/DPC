@@ -4,8 +4,8 @@ from data.point_cloud_db.point_cloud_dataset import PointCloudDataset
 from models.sub_models.dgcnn.dgcnn_modular import DGCNN_MODULAR
 from models.sub_models.dgcnn.dgcnn import get_graph_feature
 
-from models.sub_models.cross_attention.transformers import FlexibleTransformerEncoder, MaskedTransformerCrossEncoder
-from models.sub_models.cross_attention.transformers import TransformerSelfLayer, TransformerCrossLayer
+from models.sub_models.cross_attention.transformers import FlexibleTransformerEncoder, NovelTransformerEncoder
+from models.sub_models.cross_attention.transformers import TransformerSelfLayer, TransformerCrossLayer, NovelSelfLayer
 from models.sub_models.cross_attention.position_embedding import PositionEmbeddingCoordsSine, \
     PositionEmbeddingLearned
 from models.sub_models.cross_attention.warmup import WarmUpScheduler
@@ -54,38 +54,15 @@ class GroupingOperation(torch.autograd.Function):
 
 grouping_operation = GroupingOperation.apply
 
-class TransPointCorr(ShapeCorrTemplate):
+class NovelPointCorr(ShapeCorrTemplate):
     
     def __init__(self, hparams, **kwargs):
         """Stub."""
-        super(TransPointCorr, self).__init__(hparams, **kwargs)
-        self.preenc = nn.Sequential(nn.Linear(3, self.hparams.d_embed//4), nn.ReLU(True), nn.Linear(self.hparams.d_embed//4, self.hparams.d_embed), nn.ReLU(True))
+        super(NovelPointCorr, self).__init__(hparams, **kwargs)
         
-        ###transformer
-        self.encoder_self_layer = TransformerSelfLayer(
-            self.hparams.d_embed, self.hparams.nhead, self.hparams.d_feedforward, self.hparams.dropout,
-            activation=self.hparams.transformer_act,
-            normalize_before=self.hparams.pre_norm,
-            sa_val_has_pos_emb=self.hparams.sa_val_has_pos_emb,
-            ca_val_has_pos_emb=self.hparams.ca_val_has_pos_emb,
-            attention_type=self.hparams.attention_type,
-        )
-
-        self.encoder_cross_layer = TransformerCrossLayer(
-            self.hparams.d_embed, self.hparams.nhead, self.hparams.d_feedforward, self.hparams.dropout,
-            activation=self.hparams.transformer_act,
-            normalize_before=self.hparams.pre_norm,
-            sa_val_has_pos_emb=self.hparams.sa_val_has_pos_emb,
-            ca_val_has_pos_emb=self.hparams.ca_val_has_pos_emb,
-            attention_type=self.hparams.attention_type,
-        )
         self.encoder_norm = nn.LayerNorm(self.hparams.d_embed) if self.hparams.pre_norm else None
-
-        masking_radius = {"2": [math.pow(x, 2) for x in [0.2, 0.0]], "3":[math.pow(x, 2) for x in [0.2, 0.8, 0.0]], "4":[math.pow(x, 2) for x in [0.1, 0.3, 0.8, 0.0]], "6": [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]}
-        # masking_radius = {"2": [math.pow(x, 2) for x in [0.2, 0.0]], "3":[math.pow(x, 2) for x in [0.0, 0.0, 0.0]], "4":[math.pow(x, 2) for x in [0.1, 0.3, 0.8, 0.0]], "6": [math.pow(x, 2) for x in [0.2, 0.4, 0.8, 1.2, 0.0, 0.0]]}
         
-        self.encoder_CROSS = FlexibleTransformerEncoder(
-            self.encoder_self_layer, self.encoder_cross_layer, self.hparams.layer_list, masking_radius[str(self.hparams.layer_list.count('s'))], self.encoder_norm, self.hparams.compute_ssw_loss)
+        self.encoder_CROSS = NovelTransformerEncoder(hparams, self.hparams.layer_list, self.encoder_norm, True)
         
         self.pos_embed = PositionEmbeddingCoordsSine(3, self.hparams.d_embed, scale= 1.0)
         ###
@@ -126,9 +103,6 @@ class TransPointCorr(ShapeCorrTemplate):
         elif self.hparams.steplr2:
             self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.slr, weight_decay=self.hparams.swd)
             self.scheduler = StepLR(optimizer=self.optimizer, step_size=65, gamma=0.7)
-        elif self.hparams.testlr:
-            self.optimizer = torch.optim.SGD(self.parameters(), lr=self.hparams.slr, weight_decay=self.hparams.swd)
-            self.scheduler = StepLR(optimizer=self.optimizer, step_size=65, gamma=0.7)
         else:
             self.optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
             self.scheduler = MultiStepLR(self.optimizer, milestones=[6, 9], gamma=0.1)
@@ -141,35 +115,26 @@ class TransPointCorr(ShapeCorrTemplate):
     #         shape["dense_output_features"] = self.encoder_DGCNN.forward_per_point(shape["pos"], start_neighs=shape["neigh_idxs"])
     #     return shape
     
-    def compute_cross_features(self, source, target): 
+    def compute_self_features(self, source, target): 
         source_pe=self.pos_embed(source["pos"].reshape(-1,3)).reshape(-1,1024,self.hparams.d_embed)
         target_pe=self.pos_embed(target["pos"].reshape(-1,3)).reshape(-1,1024,self.hparams.d_embed)
         src_out, tgt_out = self.encoder_CROSS(
-            source["dense_output_features"].transpose(0,1),  target["dense_output_features"].transpose(0,1),
-            src_pos=source_pe.transpose(0,1) if self.hparams.transformer_encoder_has_pos_emb else None,
-            tgt_pos=target_pe.transpose(0,1) if self.hparams.transformer_encoder_has_pos_emb else None,
+            source["pos"].transpose(0,1),  target["pos"].transpose(0,1),
             src_xyz = source["pos"],
-            tgt_xyz = target["pos"]
+            tgt_xyz = target["pos"],
+            src_neigh = source["neigh_idxs"],
+            tgt_neigh = target["neigh_idxs"],
         )
         
-        if self.hparams.compute_ssw_loss:
-            source["dense_output_features"] = src_out[-1].transpose(0,1)
-            target["dense_output_features"] = tgt_out[-1].transpose(0,1)
-            source["intermediate_features"] = [src_out[i].transpose(0,1) for i in range(src_out.shape[0])]
-            target["intermediate_features"] = [tgt_out[i].transpose(0,1) for i in range(tgt_out.shape[0])]
-        else:
-            source["dense_output_features"] = src_out.transpose(0,1)
-            target["dense_output_features"] = tgt_out.transpose(0,1)
+        source["dense_output_features"] = src_out.transpose(1,2)
+        target["dense_output_features"] = tgt_out.transpose(1,2)
         
         return source, target
 
     def forward_source_target(self, source, target):
-
-        source["dense_output_features"] = self.preenc(source["pos"])
-        target["dense_output_features"] = self.preenc(target["pos"])
         
         ###transformers     
-        source, target = self.compute_cross_features(source, target)
+        source, target = self.compute_self_features(source, target)
         ###
 
         # measure cross similarity
@@ -420,7 +385,6 @@ class TransPointCorr(ShapeCorrTemplate):
         parser.add_argument("--warmup", nargs="?", default=False, type=str2bool, const=True, help="whether to use warmup")
         parser.add_argument("--steplr", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR")
         parser.add_argument("--steplr2", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR2")
-        parser.add_argument("--testlr", nargs="?", default=False, type=str2bool, const=True, help="whether to use test lr")
         parser.add_argument("--slr", type=float, default= 5e-4, help="steplr learning rate")
         parser.add_argument("--swd", default=5e-4, type=float, help="steplr2 weight decay")
         parser.add_argument("--layer_list", type=list, default=['s', 'c', 's', 'c', 's', 'c', 's', 'c'], help="encoder layer list")
@@ -445,8 +409,8 @@ class TransPointCorr(ShapeCorrTemplate):
             accumulate_grad_batches=2,
             latent_dim=768,
             bb_size=24,
-            num_encoder_layers = 4,
-            enc_type = "masked",
+            num_neighs=27,
+
             val_vis_interval=20,
             test_vis_interval=20,
         )

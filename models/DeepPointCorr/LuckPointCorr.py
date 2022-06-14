@@ -103,6 +103,9 @@ class LuckPointCorr(ShapeCorrTemplate):
         elif self.hparams.steplr2:
             self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.slr, weight_decay=self.hparams.swd)
             self.scheduler = StepLR(optimizer=self.optimizer, step_size=65, gamma=0.7)
+        elif self.hparams.testlr:
+            self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.slr, weight_decay=self.hparams.swd)
+            self.scheduler = StepLR(optimizer=self.optimizer, step_size=30, gamma=0.8)
         else:
             self.optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
             self.scheduler = MultiStepLR(self.optimizer, milestones=[6, 9], gamma=0.1)
@@ -385,6 +388,7 @@ class LuckPointCorr(ShapeCorrTemplate):
         parser.add_argument("--warmup", nargs="?", default=False, type=str2bool, const=True, help="whether to use warmup")
         parser.add_argument("--steplr", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR")
         parser.add_argument("--steplr2", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR2")
+        parser.add_argument("--testlr", nargs="?", default=False, type=str2bool, const=True, help="whether to use test lr")
         parser.add_argument("--slr", type=float, default= 5e-4, help="steplr learning rate")
         parser.add_argument("--swd", default=5e-4, type=float, help="steplr2 weight decay")
         parser.add_argument("--layer_list", type=list, default=['s', 'c', 's', 'c', 's', 'c', 's', 'c'], help="encoder layer list")
