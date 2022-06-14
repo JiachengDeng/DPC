@@ -860,7 +860,7 @@ class LuckSelfLayer(nn.Module):
                               value=src_w_pos if self.sa_val_has_pos_emb else src,
                               attn_mask=src_mask,
                               key_padding_mask= src_key_padding_mask)
-        src = src + self.dropout(src2) # N B C
+        src = src - self.dropout(src2) # N B C
         src = self.linear(src.permute(1,2,0)) # B C N
         src = self.norm(src) # B C N
         src = self.activation(src) # B C N
@@ -871,7 +871,7 @@ class LuckSelfLayer(nn.Module):
                                               value=tgt_w_pos if self.sa_val_has_pos_emb else tgt,
                                               attn_mask=tgt_mask,
                                               key_padding_mask=tgt_key_padding_mask)
-        tgt = tgt + self.dropout(tgt2)
+        tgt = tgt - self.dropout(tgt2)
         tgt = self.linear(tgt.permute(1,2,0))
         tgt = self.norm(tgt)
         tgt = self.activation(tgt)
