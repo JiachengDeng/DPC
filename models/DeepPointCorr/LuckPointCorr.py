@@ -119,8 +119,6 @@ class LuckPointCorr(ShapeCorrTemplate):
     #     return shape
     
     def compute_self_features(self, source, target): 
-        source_pe=self.pos_embed(source["pos"].reshape(-1,3)).reshape(-1,1024,self.hparams.d_embed)
-        target_pe=self.pos_embed(target["pos"].reshape(-1,3)).reshape(-1,1024,self.hparams.d_embed)
         src_out, tgt_out = self.encoder_CROSS(
             source["pos"].transpose(0,1),  target["pos"].transpose(0,1),
             src_xyz = source["pos"],
@@ -311,16 +309,23 @@ class LuckPointCorr(ShapeCorrTemplate):
         batch = self(batch)
         p = batch["P_normalized"].clone()
         
-        # ### For visualization
-        # p_cpu = p.data.cpu().numpy()
-        # source_xyz = pinput1.data.cpu().numpy()
-        # target_xyz = input2.data.cpu().numpy()
-        # label_cpu = label.data.cpu().numpy()
-        # np.save("./smal-test/p_{}".format(batch_idx), p_cpu)
-        # np.save("./smal-test/source_{}".format(batch_idx), source_xyz)
-        # np.save("./smal-test/target_{}".format(batch_idx), target_xyz)
-        # np.save("./smal-test/label_{}".format(batch_idx), label_cpu)
-        # ###
+        ### For visualization
+        p_cpu = p.data.cpu().numpy()
+        source_xyz = pinput1.data.cpu().numpy()
+        target_xyz = input2.data.cpu().numpy()
+        label_cpu = label.data.cpu().numpy()
+        softlabel_cpu0024 = soft_labels['0.024'].data.cpu().numpy()
+        softlabel_cpu003 = soft_labels['0.03'].data.cpu().numpy()
+        softlabel_cpu0034 = soft_labels['0.034'].data.cpu().numpy()
+        # np.save("./tosca-149-test/p_{}".format(batch_idx), p_cpu)
+        # np.save("./tosca-149-test/source_{}".format(batch_idx), source_xyz)
+        # np.save("./tosca-149-test/target_{}".format(batch_idx), target_xyz)
+        # np.save("./tosca-149-test/label_{}".format(batch_idx), label_cpu)
+        np.save("./tosca-test-softlabel0.024/softlabel_{}".format(batch_idx), softlabel_cpu0024)
+        np.save("./tosca-test-softlabel0.03/softlabel_{}".format(batch_idx), softlabel_cpu003)
+        np.save("./tosca-test-softlabel0.034/softlabel_{}".format(batch_idx), softlabel_cpu0034)
+        
+        ##
         
         if self.hparams.use_dualsoftmax_loss:
             temp = 0.0002

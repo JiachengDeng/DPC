@@ -972,20 +972,30 @@ class NovelTransformerEncoder(nn.Module):
         self.layer_list = layer_list
         self.norm = norm
         self.return_intermediate = return_intermediate
-        self.premlp = nn.Sequential(
-                nn.Conv1d(self.input_features, self.bb_size * 4, kernel_size=1, bias=False), nn.BatchNorm1d(self.bb_size * 4), nn.LeakyReLU(negative_slope=0.2),
-            )
+        
         self.pos_embed = nn.ModuleList([PositionEmbeddingCoordsSine(3, self.bb_size * (2 ** (i+1)) * 2, scale= 1.0) for i in range(self.num_layers)])
 
         for i in range(self.num_layers):
             in_features =  self.bb_size * (2 ** (i+1)) * 2
-            self.layers.append(LuckSelfLayer(
-            in_features, self.hparams.nhead, self.hparams.d_feedforward, self.hparams.dropout,
-            activation=self.hparams.transformer_act,
-            normalize_before=self.hparams.pre_norm,
-            sa_val_has_pos_emb=self.hparams.sa_val_has_pos_emb,
-            ca_val_has_pos_emb=self.hparams.ca_val_has_pos_emb,
-        ))
+            if self.layer_list[i] == 's':
+                self.layers.append(LuckSelfLayer(
+                in_features, self.hparams.nhead, self.hparams.d_feedforward, self.hparams.dropout,
+                activation=self.hparams.transformer_act,
+                normalize_before=self.hparams.pre_norm,
+                sa_val_has_pos_emb=self.hparams.sa_val_has_pos_emb,
+                ca_val_has_pos_emb=self.hparams.ca_val_has_pos_emb,
+                ))
+            elif self.layer_list[i] == 'c':
+                self.layers.append(LuckCrossLayer(
+                in_features, self.hparams.nhead, self.hparams.d_feedforward, self.hparams.dropout,
+                activation=self.hparams.transformer_act,
+                normalize_before=self.hparams.pre_norm,
+                sa_val_has_pos_emb=self.hparams.sa_val_has_pos_emb,
+                ca_val_has_pos_emb=self.hparams.ca_val_has_pos_emb,
+                ))
+            else: 
+                assert(self.layer_list[i] in ["s", "c"]), "Please set layer_list only with 's' and 'c' representing 'self_attention_layer' and 'cross_attention_layer' respectively"
+            
         last_in_dim = self.bb_size * 2 * sum([2 ** i for i in range(1,self.num_layers + 1,1)])
         self.mlp = nn.Sequential(
                 nn.Conv1d(last_in_dim, self.latent_dim, kernel_size=1, bias=False), nn.BatchNorm1d(self.latent_dim), nn.LeakyReLU(negative_slope=0.2),
@@ -1009,9 +1019,6 @@ class NovelTransformerEncoder(nn.Module):
                 tgt_neigh: Optional[Tensor] = None,):
 
         src_intermediate, tgt_intermediate = [], []
-
-        src = self.premlp(src.permute(1,2,0)).permute(2,0,1)
-        tgt = self.premlp(tgt.permute(1,2,0)).permute(2,0,1)
         
         for idx, layer in enumerate(self.layers):
             src_mask = self.compute_neibor_mask(src_neigh)
@@ -1126,6 +1133,70 @@ class NovelSelfLayer(nn.Module):
                                               value=tgt_w_pos if self.sa_val_has_pos_emb else tgt,
                                               attn_mask=tgt_mask,
                                               key_padding_mask=tgt_key_padding_mask)
+        tgt = tgt - self.dropout(tgt2)
+        tgt = self.linear(tgt.permute(1,2,0))
+        tgt = self.norm(tgt)
+        tgt = self.activation(tgt)
+
+        # Stores the attention weights for analysis, if required
+        self.satt_weights = (satt_weights_s, satt_weights_t)
+
+        return src.permute(2,0,1), tgt.permute(2,0,1)
+
+class NovelCrossLayer(nn.Module):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
+                 activation="relu", normalize_before=False,
+                 sa_val_has_pos_emb=False,
+                 ca_val_has_pos_emb=False,
+                 ):
+        super().__init__()
+
+        self.nhead = nhead
+
+        self.cross_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+
+
+        # Implementation of Feedforward model
+        self.linear = nn.Conv1d(d_model, d_model, kernel_size=1, bias=False)
+        self.dropout = nn.Dropout(dropout)
+        self.norm = nn.BatchNorm1d(d_model)
+
+
+
+        self.activation = nn.LeakyReLU(negative_slope=0.2)
+        self.sa_val_has_pos_emb = sa_val_has_pos_emb
+        self.ca_val_has_pos_emb = ca_val_has_pos_emb
+        self.satt_weights, self.xatt_weights = None, None  # For analysis
+
+    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
+        return tensor if pos is None else tensor + pos
+
+    def forward(self, src, tgt,
+                     src_mask: Optional[Tensor] = None,
+                     tgt_mask: Optional[Tensor] = None,
+                     src_key_padding_mask: Optional[Tensor] = None,
+                     tgt_key_padding_mask: Optional[Tensor] = None,
+                     src_pos: Optional[Tensor] = None,
+                     tgt_pos: Optional[Tensor] = None,):
+
+
+        # Cross attention
+        src_w_pos = self.with_pos_embed(src, src_pos)
+        tgt_w_pos = self.with_pos_embed(tgt, tgt_pos)
+
+        src2, satt_weights_s = self.cross_attn(query = src_w_pos, key = tgt_w_pos,
+                              value=tgt_w_pos if self.sa_val_has_pos_emb else tgt,
+                              key_padding_mask= src_key_padding_mask)
+
+        tgt2, satt_weights_t = self.cross_attn(tgt_w_pos, src_w_pos,
+                                        value=src_w_pos if self.sa_val_has_pos_emb else src,
+                                        key_padding_mask=tgt_key_padding_mask)
+        src = src - self.dropout(src2) # N B C
+        src = self.linear(src.permute(1,2,0)) # B C N
+        src = self.norm(src) # B C N
+        src = self.activation(src) # B C N
+
+
         tgt = tgt - self.dropout(tgt2)
         tgt = self.linear(tgt.permute(1,2,0))
         tgt = self.norm(tgt)

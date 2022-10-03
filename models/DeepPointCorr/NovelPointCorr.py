@@ -2,6 +2,7 @@ from visualization.visualize_api import visualize_pair_corr, visualize_reconstru
 from data.point_cloud_db.point_cloud_dataset import PointCloudDataset
 
 from models.sub_models.dgcnn.dgcnn_modular import DGCNN_MODULAR
+from models.sub_models.pointnet2.pointnet2_encoder import pointnet2encoder
 from models.sub_models.dgcnn.dgcnn import get_graph_feature
 
 from models.sub_models.cross_attention.transformers import FlexibleTransformerEncoder, NovelTransformerEncoder
@@ -59,6 +60,13 @@ class NovelPointCorr(ShapeCorrTemplate):
     def __init__(self, hparams, **kwargs):
         """Stub."""
         super(NovelPointCorr, self).__init__(hparams, **kwargs)
+        if hparams.preenc_type == "mlp":
+            self.pre_encoder = nn.Sequential(
+                    nn.Conv1d(hparams.in_features_dim, hparams.bb_size * 4, kernel_size=1, bias=False), nn.BatchNorm1d(hparams.bb_size * 4), nn.LeakyReLU(negative_slope=0.2),
+                )
+        elif hparams.preenc_type == "pointnet2":
+            self.pre_encoder = pointnet2encoder(hparams.in_features_dim, hparams.bb_size * 4)
+            
         
         self.encoder_norm = nn.LayerNorm(self.hparams.d_embed) if self.hparams.pre_norm else None
         
@@ -103,6 +111,9 @@ class NovelPointCorr(ShapeCorrTemplate):
         elif self.hparams.steplr2:
             self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.slr, weight_decay=self.hparams.swd)
             self.scheduler = StepLR(optimizer=self.optimizer, step_size=65, gamma=0.7)
+        elif self.hparams.testlr:
+            self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.slr, weight_decay=self.hparams.swd)
+            self.scheduler = StepLR(optimizer=self.optimizer, step_size=30, gamma=0.8)
         else:
             self.optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
             self.scheduler = MultiStepLR(self.optimizer, milestones=[6, 9], gamma=0.1)
@@ -115,11 +126,14 @@ class NovelPointCorr(ShapeCorrTemplate):
     #         shape["dense_output_features"] = self.encoder_DGCNN.forward_per_point(shape["pos"], start_neighs=shape["neigh_idxs"])
     #     return shape
     
+    def compute_preenc_features(self, source, target):
+        source["dense_output_features"] = self.pre_encoder(source["pos"].transpose(1,2)).permute(2,0,1)  # src = [N, B, C] 
+        target["dense_output_features"] = self.pre_encoder(target["pos"].transpose(1,2)).permute(2,0,1)
+        return source, target
+    
     def compute_self_features(self, source, target): 
-        source_pe=self.pos_embed(source["pos"].reshape(-1,3)).reshape(-1,1024,self.hparams.d_embed)
-        target_pe=self.pos_embed(target["pos"].reshape(-1,3)).reshape(-1,1024,self.hparams.d_embed)
         src_out, tgt_out = self.encoder_CROSS(
-            source["pos"].transpose(0,1),  target["pos"].transpose(0,1),
+            source["dense_output_features"],  target["dense_output_features"],
             src_xyz = source["pos"],
             tgt_xyz = target["pos"],
             src_neigh = source["neigh_idxs"],
@@ -133,7 +147,10 @@ class NovelPointCorr(ShapeCorrTemplate):
 
     def forward_source_target(self, source, target):
         
-        ###transformers     
+        ###PreEncoder
+        source, target = self.compute_preenc_features(source, target)
+        
+        ###transformers 
         source, target = self.compute_self_features(source, target)
         ###
 
@@ -366,6 +383,7 @@ class NovelPointCorr(ShapeCorrTemplate):
         PreEncoder-related args
         '''
         parser.add_argument("--use_preenc", nargs="?", default=True, type=str2bool, const=False, help="whether to use DGCNN pre-encoder")
+        parser.add_argument("--preenc_type", type=str, default="mlp", help="pre-encoder type")
         
         '''
         Transformer-related args
@@ -385,6 +403,7 @@ class NovelPointCorr(ShapeCorrTemplate):
         parser.add_argument("--warmup", nargs="?", default=False, type=str2bool, const=True, help="whether to use warmup")
         parser.add_argument("--steplr", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR")
         parser.add_argument("--steplr2", nargs="?", default=False, type=str2bool, const=True, help="whether to use StepLR2")
+        parser.add_argument("--testlr", nargs="?", default=False, type=str2bool, const=True, help="whether to use test lr")
         parser.add_argument("--slr", type=float, default= 5e-4, help="steplr learning rate")
         parser.add_argument("--swd", default=5e-4, type=float, help="steplr2 weight decay")
         parser.add_argument("--layer_list", type=list, default=['s', 'c', 's', 'c', 's', 'c', 's', 'c'], help="encoder layer list")
