@@ -248,7 +248,7 @@ class DeepPointCorr(ShapeCorrTemplate):
         batch = self(batch)
         p = batch["P_normalized"].clone()
 
-        ### For visualization
+        # ### For visualization
         # p_cpu = p.data.cpu().numpy()
         # source_xyz = pinput1.data.cpu().numpy()
         # target_xyz = input2.data.cpu().numpy()
